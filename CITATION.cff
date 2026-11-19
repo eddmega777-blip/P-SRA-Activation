@@ -2,6 +2,7 @@ cff-version: 1.2.0
 message: "If you use P-SRA or the unified benchmark in your research, please cite this work."
 title: "P-SRA: Parametric Smooth Rational Activation"
 version: 1.0.0
+doi: "10.5281/zenodo.24378742"
 date-released: 2026-11-19
 license: MIT
 repository-code: "https://github.com/eddmega777-blip/P-SRA-Activation"
