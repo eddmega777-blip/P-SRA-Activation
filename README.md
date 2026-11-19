@@ -73,6 +73,6 @@ python experiments/psra_unified_benchmark.py
   title={P-SRA: Exploring Parametric Smooth Rational Activations Under Box-Constrained Projected Gradient Descent},
   author={Calzada Hern{\'a}ndez, Eduardo},
   year={2026},
-  note={Preprint and reproducible codebase available at [https://github.com/TU_USUARIO/P-SRA-Activation](https://github.com/TU_USUARIO/P-SRA-Activation)}
+  note={Preprint and reproducible codebase available at [https://github.com/eddmega777-blip/P-SRA-Activation](https://github.com/eddmega777-blip/P-SRA-Activation)}
 }
 ```
