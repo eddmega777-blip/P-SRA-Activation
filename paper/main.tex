@@ -1,0 +1,264 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\begin{document}
+
+\title{P-SRA: Exploring Parametric Smooth Rational Activations Under Box-Constrained Projected Gradient Descent}
+
+\author{
+\IEEEauthorblockN{Eduardo Calzada Hern\'andez}
+\IEEEauthorblockA{Independent Artificial Intelligence Researcher\\
+Zumpango, Estado de M\'exico, M\'exico\\
+Email: edd.mega777@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+Activation functions play a decisive role in balancing gradient propagation, computational efficiency, and sensitivity to input perturbations. While piecewise linear units such as ReLU and PReLU remain computationally lightweight, their unbounded positive growth amplifies extreme input spikes; conversely, fixed rational units such as Elliott compress outliers effectively but lack trainable shape adaptability. In this work, we investigate \textbf{P-SRA} (\textit{Parametric Smooth Rational Activation}), a three-parameter per-neuron piecewise rational function ($\alpha, \beta, \gamma$) formulated exclusively with elementary algebraic operations. To decouple the intrinsic behavior of the rational equation from its optimization dynamics, we pair exact backpropagation gradients with box-constrained Projected Gradient Descent (PGD) and elastic initialization anchoring under Adam, and evaluate P-SRA against standard baselines alongside a hard-clipped PReLU control sharing identical initial slopes and output bounds. Across 10-seed tabular benchmarks, ablation studies, 12-layer gradient-retention tests, and 60,000-sample Fashion-MNIST experiments on single-threaded CPU hardware, P-SRA demonstrates competitive clean accuracy (97.62\% on 25-feature Breast Cancer and 88.04\% on Fashion-MNIST), the highest relative gradient retention (0.7096) in unresidualized 12-layer networks, and substantially lower regression error under severe directional outliers ($\pm 10\sigma$ to $+20\sigma$) than both unbounded activations and hard-clipped linear controls.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Activation functions, rational neural networks, projected gradient descent, gradient preservation, outlier sensitivity, CPU execution.
+\end{IEEEkeywords}
+
+\section{Introduction}
+The design of nonlinear activation functions involves fundamental trade-offs between representational flexibility, gradient flow across deep topologies, and sensitivity to out-of-distribution perturbations. Rectified Linear Units (ReLU) \cite{he2015delving} offer minimal arithmetic cost on general-purpose CPUs, yet their zero negative response can induce inactive neurons while their unbounded positive branch ($z > 0$) transmits extreme input spikes without attenuation. Smooth transcendental activations such as ELU \cite{clevert2016fast} and GELU \cite{hendrycks2016gaussian} improve gradient continuity near the origin, but rely on transcendental operations (\texttt{exp}, \texttt{tanh}) that increase arithmetic latency on CPU-only environments.
+
+Rational activation functions provide an algebraic alternative capable of modeling smooth saturation using only elementary arithmetic \cite{elliott1993better, molina2020pade}. In this paper, we formulate and empirically examine \textbf{P-SRA} (\textit{Parametric Smooth Rational Activation}), a degree-$(1,1)$ piecewise rational unit governed by three trainable parameters per neuron ($\alpha, \beta, \gamma$). Rather than claiming universal dominance over established activations, our objective is to systematically isolate how much of P-SRA's empirical behavior stems from: (i) its smooth rational curvature, (ii) its asymmetric output bounds, and (iii) its box-constrained Projected Gradient Descent (PGD) optimization regime.
+
+Our main contributions are:
+\begin{enumerate}
+    \item \textbf{Asymmetric Piecewise Rational Formulation:} We define a continuous ($C^0$), piecewise smooth ($C^\infty$ on $\mathbb{R}\setminus\{0\}$) rational unit confined to the asymmetric interval $(-1, \alpha/\beta)$ using one comparison, two multiplications, one addition, and one division per neuron.
+    \item \textbf{Causal Decomposition via Hard-Clipped Control \& Ablations:} By comparing P-SRA against a range-matched \textit{Clipped PReLU} control and quadratic reparameterization ablations ($\gamma = q^2$), we demonstrate that smooth rational compression outperforms hard linear clipping under directional outliers while box-constrained PGD prevents parameter drift under Adam.
+    \item \textbf{Unified Multi-Scale Evaluation:} Using a single reproducible protocol across 10 random seeds (\url{https://github.com/TU_USUARIO/P-SRA-Activation}), we evaluate deep 12-layer gradient retention, directional outlier stress ($\pm 10\sigma, +20\sigma$), per-neuron parameter trajectories, and 60,000-sample Fashion-MNIST classification on single-threaded CPU hardware.
+\end{enumerate}
+
+\section{Related Work}
+\textbf{Piecewise Linear Units:} Leaky ReLU and Parametric ReLU (PReLU) \cite{he2015delving} preserve negative gradient flow via a learnable slope $\gamma z$ for $z < 0$. However, both remain unbounded for $z \ge 0$, offering no intrinsic damping when corrupted inputs enter the positive half-space.
+
+\textbf{Fixed and High-Order Rational Units:} Elliott \cite{elliott1993better} introduced $f(z) = z / (1 + |z|)$ as a fast algebraic alternative to sigmoid functions. Although strongly bounded in $(-1, 1)$, its fixed symmetric curve saturates rapidly near zero and cannot adapt its slope or upper asymptote to task requirements. Conversely, Pad\'e Activation Units (PAU) \cite{molina2020pade} learn higher-degree rational polynomials $(m, n)$, achieving high expressiveness at the cost of evaluating multiple polynomial terms per neuron. P-SRA occupies an intermediate regime: a minimal degree-$(1,1)$ piecewise rational unit with three interpretable shape parameters per neuron.
+
+\section{Mathematical Formulation of P-SRA}
+
+\subsection{Forward Definition and Asymmetric Bounds}
+For a scalar pre-activation $z_{i,j}^{(l)}$ corresponding to sample $i$ and neuron $j$ in layer $l$, P-SRA is defined as:
+\begin{equation}
+f\left(z; \alpha_j, \beta_j, \gamma_j\right) = 
+\begin{cases} 
+\dfrac{\alpha_j z}{1 + \beta_j z} & \text{if } z \ge 0 \\[12pt]
+\dfrac{\gamma_j z}{1 - \gamma_j z} & \text{if } z < 0
+\end{cases}
+\label{eq:psra_forward}
+\end{equation}
+where $\alpha_j > 0$ controls positive gain near the origin, $\beta_j > 0$ regulates positive asymptotic compression, and $\gamma_j > 0$ governs both negative initial slope and saturation rate toward $-1$.
+
+P-SRA is continuous across $\mathbb{R}$ with $f(0) = 0$, exhibiting a slope transition at the origin between $f'(0^-) = \gamma_j$ and $f'(0^+) = \alpha_j$. Its output is strictly bounded within the asymmetric range:
+\begin{equation}
+f(z; \alpha_j, \beta_j, \gamma_j) \in \left(-1,\; \frac{\alpha_j}{\beta_j}\right)
+\end{equation}
+Unlike symmetric saturating functions, this asymmetric interval permits larger positive dynamic range while preventing unbounded activation growth.
+
+\subsection{Exact Backpropagation Gradients}
+Given an upstream gradient $\delta_{\text{act}} = \partial \mathcal{L} / \partial f$, the spatial derivative with respect to $z$ decays quadratically ($O(z^{-2})$), avoiding the exponential decay ($O(e^{-|z|})$) of sigmoid units:
+\begin{equation}
+\frac{\partial f}{\partial z} = 
+\begin{cases} 
+\dfrac{\alpha_j}{(1 + \beta_j z)^2} & \text{if } z \ge 0 \\[12pt]
+\dfrac{\gamma_j}{(1 - \gamma_j z)^2} & \text{if } z < 0
+\end{cases}
+\label{eq:psra_dz}
+\end{equation}
+
+Over a mini-batch of $m$ samples, the partial derivatives for the trainable shape parameters accumulate over their active branches:
+\begin{align}
+\frac{\partial \mathcal{L}}{\partial \alpha_j} &= \frac{1}{m} \sum_{i : z_{i,j} \ge 0} \delta_{\text{act}_{i,j}} \frac{z_{i,j}}{1 + \beta_j z_{i,j}} \\
+\frac{\partial \mathcal{L}}{\partial \beta_j} &= \frac{1}{m} \sum_{i : z_{i,j} \ge 0} \delta_{\text{act}_{i,j}} \left( -\frac{\alpha_j z_{i,j}^2}{(1 + \beta_j z_{i,j})^2} \right) \\
+\frac{\partial \mathcal{L}}{\partial \gamma_j} &= \frac{1}{m} \sum_{i : z_{i,j} < 0} \delta_{\text{act}_{i,j}} \frac{z_{i,j}}{(1 - \gamma_j z_{i,j})^2}
+\end{align}
+
+\subsection{Box-Constrained PGD with Elastic Anchoring}
+Strict positivity $\beta_j, \gamma_j > 0$ guarantees that the denominators in Eq.~\eqref{eq:psra_forward} remain $\ge 1$. Enforcing positivity via quadratic reparameterization ($\gamma_j = q_j^2 + \epsilon$) introduces a $2q_j$ factor into $\partial \mathcal{L}/\partial q_j$, creating an absorbing saddle point as $q_j \to 0$. Furthermore, allowing $\beta_j \to 10^{-4}$ expands the upper asymptote $\alpha_j/\beta_j > 10^4$, re-exposing the network to positive outliers.
+
+To avoid both failure modes without altering Eq.~\eqref{eq:psra_forward}, we apply an elastic initialization anchor ($\lambda_{\text{act}} = 10^{-3}$) toward $\theta_0$:
+\begin{equation}
+\tilde{g}_{\theta_j} = \frac{\partial \mathcal{L}}{\partial \theta_j} + \lambda_{\text{act}} (\theta_j - \theta_0), \quad \theta_j \in \{\alpha_j, \beta_j, \gamma_j\}
+\end{equation}
+followed by direct box-constrained Projected Gradient Descent (PGD) after the Adam step $\Delta \theta_j$:
+\begin{align}
+\alpha_j &\leftarrow \text{clip}\!\left(\alpha_j - \eta_{\text{act}} \Delta \alpha_j,\; 0.2,\; 2.5\right) \\
+\beta_j  &\leftarrow \text{clip}\!\left(\beta_j - \eta_{\text{act}} \Delta \beta_j,\; 0.05,\; 2.0\right) \\
+\gamma_j &\leftarrow \text{clip}\!\left(\gamma_j - \eta_{\text{act}} \Delta \gamma_j,\; 0.05,\; 1.5\right)
+\end{align}
+We adopt the balanced initialization $\alpha_0 = 1.0$, $\beta_0 = 0.08$, and $\gamma_0 = 0.35$, fixing an initial output range of $(-1.0, 12.5)$.
+
+\section{Unified Experimental Protocol}
+All experiments were executed in Python/NumPy on a single-threaded CPU environment (\texttt{OMP\_NUM\_THREADS=1}) using a unified set of 10 random seeds ($\{42, 101, \dots, 909\}$) and identical train/test splits (75\%/25\% standardized). Models were trained with Adam \cite{kingma2015adam} ($\eta_w = 0.004$, $\eta_{\text{act}} = 0.001$, 300 epochs on tabular $[48, 32]$ MLPs; $\eta_w = 0.002$, $\eta_{\text{act}} = 0.0005$, batch size 256, 8 epochs on $[128, 64]$ Fashion-MNIST MLPs).
+
+To separate the effect of the smooth rational curve from mere range bounding, we included \textbf{Clipped PReLU} as a controlled baseline initialized with identical slopes ($\alpha_0 = 1.0, \gamma_0 = 0.35$) and hard output clipping to $[-1.0, 12.5]$ (Fig.~\ref{fig:geometry}). Outlier stress was evaluated by injecting directional perturbations ($+10\sigma, +20\sigma, -10\sigma, \pm 10\sigma$) into 25\% of test samples across 3 random features on \textit{Wine} (13 inputs), \textit{Breast Cancer} (first 25 inputs), and \textit{Diabetes} (10 inputs).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig1_psra_geometry.png}
+\caption{Comparison of P-SRA Balanced ($\alpha_0=1.0, \beta_0=0.08, \gamma_0=0.35$), range-matched Clipped PReLU ($[-1.0, 12.5]$), and GELU: (left) activation response $f(z)$ and (right) spatial derivative $f'(z)$.}
+\label{fig:geometry}
+\end{figure*}
+
+\begin{table*}[t]
+\centering
+\caption{Unified 10-Seed Tabular Benchmark ($\text{Mean} \pm \text{Std}$) Including Hard-Clipped PReLU Control and CPU Runtime}
+\label{tab:unified_tabular}
+\begin{tabular}{llcccccc}
+\toprule
+\textbf{Dataset (Task)} & \textbf{Activation} & \textbf{Clean} & \textbf{Pos $+10\sigma$} & \textbf{Pos $+20\sigma$} & \textbf{Neg $-10\sigma$} & \textbf{Mix $\pm 10\sigma$} & \textbf{CPU (ms)} \\
+\midrule
+\multirow{6}{*}{\shortstack[l]{\textbf{Wine}\\(13 inputs)\\Acc (\%) $\uparrow$}} 
+ & ReLU & $96.67 \pm 2.28$ & $83.56 \pm 3.87$ & $82.22 \pm 3.58$ & $84.22 \pm 3.21$ & $84.89 \pm 4.85$ & $572.5 \pm 174.8$ \\
+ & PReLU & $97.33 \pm 2.18$ & $84.00 \pm 3.95$ & $82.89 \pm 4.22$ & $85.33 \pm 2.85$ & $85.33 \pm 5.98$ & $423.4 \pm 71.9$ \\
+ & Clipped PReLU (Control) & $96.67 \pm 2.48$ & $84.67 \pm 4.15$ & $82.67 \pm 4.85$ & $84.89 \pm 2.95$ & $85.78 \pm 5.28$ & $318.8 \pm 13.3$ \\
+ & Elliott & $\mathbf{97.78 \pm 2.22}$ & $\mathbf{85.33 \pm 3.74}$ & $\mathbf{83.11 \pm 3.17}$ & $\mathbf{86.22 \pm 2.39}$ & $85.78 \pm 5.64$ & $\mathbf{141.8 \pm 7.2}$ \\
+ & GELU & $96.67 \pm 2.28$ & $84.44 \pm 4.10$ & $82.22 \pm 3.58$ & $83.78 \pm 2.99$ & $85.11 \pm 4.87$ & $466.6 \pm 71.7$ \\
+ & \textbf{P-SRA Balanced (Ours)} & $96.89 \pm 2.47$ & $84.44 \pm 3.72$ & $82.67 \pm 4.07$ & $85.11 \pm 3.30$ & $\mathbf{86.22 \pm 5.05}$ & $354.3 \pm 11.7$ \\
+\midrule
+\multirow{6}{*}{\shortstack[l]{\textbf{Breast Cancer}\\(25 inputs)\\Acc (\%) $\uparrow$}} 
+ & ReLU & $97.41 \pm 0.89$ & $87.13 \pm 1.69$ & $86.01 \pm 1.68$ & $90.77 \pm 2.12$ & $\mathbf{89.51 \pm 1.56}$ & $\mathbf{749.5 \pm 529.4}$ \\
+ & PReLU & $97.41 \pm 0.83$ & $86.85 \pm 1.43$ & $85.45 \pm 1.53$ & $90.28 \pm 2.24$ & $88.53 \pm 2.89$ & $891.8 \pm 465.6$ \\
+ & Clipped PReLU (Control) & $97.41 \pm 0.77$ & $87.34 \pm 1.81$ & $85.52 \pm 1.60$ & $90.00 \pm 2.46$ & $88.67 \pm 1.87$ & $1476.1 \pm 761.5$ \\
+ & Elliott & $97.06 \pm 0.69$ & $87.20 \pm 2.03$ & $85.66 \pm 2.06$ & $\mathbf{90.98 \pm 2.04}$ & $88.39 \pm 2.43$ & $763.0 \pm 550.4$ \\
+ & GELU & $97.20 \pm 0.88$ & $\mathbf{87.62 \pm 2.10}$ & $\mathbf{86.43 \pm 2.10}$ & $90.14 \pm 2.41$ & $88.81 \pm 1.53$ & $2054.9 \pm 988.2$ \\
+ & \textbf{P-SRA Balanced (Ours)} & $\mathbf{97.62 \pm 0.78}$ & $87.48 \pm 2.01$ & $85.87 \pm 1.95$ & $90.56 \pm 2.32$ & $89.30 \pm 1.47$ & $1793.5 \pm 742.8$ \\
+\midrule
+\multirow{6}{*}{\shortstack[l]{\textbf{Diabetes}\\(10 inputs)\\MSE $\downarrow$}} 
+ & ReLU & $0.96 \pm 0.06$ & $9.70 \pm 4.94$ & $36.57 \pm 21.33$ & $11.03 \pm 3.98$ & $13.56 \pm 5.74$ & $431.0 \pm 130.5$ \\
+ & PReLU & $\mathbf{0.81 \pm 0.13}$ & $16.05 \pm 13.20$ & $62.40 \pm 54.97$ & $11.11 \pm 8.69$ & $15.76 \pm 12.15$ & $498.6 \pm 111.8$ \\
+ & Clipped PReLU (Control) & $0.87 \pm 0.15$ & $10.42 \pm 9.79$ & $14.00 \pm 10.75$ & $7.69 \pm 3.73$ & $8.24 \pm 3.82$ & $721.1 \pm 119.2$ \\
+ & Elliott & $0.89 \pm 0.09$ & $\mathbf{1.49 \pm 0.29}$ & $\mathbf{1.62 \pm 0.31}$ & $\mathbf{1.31 \pm 0.27}$ & $\mathbf{1.31 \pm 0.14}$ & $\mathbf{316.5 \pm 47.9}$ \\
+ & GELU & $1.24 \pm 0.13$ & $9.11 \pm 2.92$ & $32.00 \pm 11.13$ & $12.28 \pm 2.71$ & $13.30 \pm 3.41$ & $717.3 \pm 70.0$ \\
+ & \textbf{P-SRA Balanced (Ours)} & $0.95 \pm 0.14$ & $5.01 \pm 2.85$ & $7.81 \pm 4.32$ & $3.65 \pm 1.41$ & $4.39 \pm 1.50$ & $969.5 \pm 191.8$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Results and Discussion}
+
+\subsection{Isolating Equation Curvature vs. Output Bounding}
+Comparing \textit{P-SRA Balanced} against \textit{Clipped PReLU} in Table~\ref{tab:unified_tabular} and Fig.~\ref{fig:asymmetry} clarifies how much outlier attenuation arises from the rational curvature itself rather than simple range truncation. On \textit{Diabetes}, bounding PReLU to $[-1.0, 12.5]$ reduces $+20\sigma$ MSE from $62.40 \pm 54.97$ to $14.00 \pm 10.75$; however, P-SRA's smooth rational compression cuts $+20\sigma$ error nearly in half again to $\mathbf{7.81 \pm 4.32}$ (and reduces $-10\sigma$ error from $7.69 \pm 3.73$ to $\mathbf{3.65 \pm 1.41}$). Whereas a clipped linear unit transmits moderate-to-large spikes at full unit slope until hitting a hard saturation wall (where its derivative drops to zero), P-SRA attenuates positive deviations smoothly right from $z > 0$ while maintaining non-zero $O(z^{-2})$ gradients.
+
+At the same time, Table~\ref{tab:unified_tabular} highlights clear empirical trade-offs: fixed \textit{Elliott} achieves stronger extreme-outlier suppression in regression ($\text{MSE} = 1.62$ at $+20\sigma$) and top clean accuracy on \textit{Wine} ($97.78\%$), whereas P-SRA achieves higher clean accuracy on 25-feature \textit{Breast Cancer} ($\mathbf{97.62 \pm 0.78\%}$) and higher accuracy under mixed $\pm 10\sigma$ perturbations on \textit{Wine} ($\mathbf{86.22\%}$).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig3_asymmetry_ablation.png}
+\caption{Log-scale test MSE on Diabetes under pure positive ($+5\sigma$ to $+20\sigma$) and pure negative ($-10\sigma$ to $-20\sigma$) outlier perturbations.}
+\label{fig:asymmetry}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\caption{Unified 10-Seed Ablation Study: Rational Equation, Per-Neuron Granularity, and Box-Constrained PGD}
+\label{tab:ablation}
+\begin{tabular}{llccc}
+\toprule
+\textbf{Dataset} & \textbf{Variant} & \textbf{Clean} & \textbf{Pos $+15\sigma$} & \textbf{Neg $-15\sigma$} \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Diabetes\\(MSE $\downarrow$)}} 
+ & \textbf{Full P-SRA (PGD+Neur.)} & $0.95 \pm 0.14$ & $\mathbf{6.60 \pm 3.71}$ & $\mathbf{4.70 \pm 1.88}$ \\
+ & Abl. 1: Clipped PReLU & $\mathbf{0.87 \pm 0.15}$ & $13.09 \pm 11.19$ & $9.58 \pm 4.84$ \\
+ & Abl. 2: PGD + Layerwise & $0.99 \pm 0.15$ & $6.70 \pm 3.76$ & $5.53 \pm 2.05$ \\
+ & Abl. 3: Quad. $q^2$ (No PGD) & $0.98 \pm 0.16$ & $11.68 \pm 9.45$ & $7.41 \pm 6.71$ \\
+\midrule
+\multirow{4}{*}{\shortstack[l]{Breast C.\\(Acc \% $\uparrow$)}} 
+ & \textbf{Full P-SRA (PGD+Neur.)} & $\mathbf{97.62 \pm 0.78}$ & $86.64 \pm 2.26$ & $89.30 \pm 2.32$ \\
+ & Abl. 1: Clipped PReLU & $97.41 \pm 0.77$ & $86.29 \pm 1.57$ & $89.02 \pm 2.85$ \\
+ & Abl. 2: PGD + Layerwise & $97.62 \pm 0.78$ & $\mathbf{86.71 \pm 2.19}$ & $\mathbf{89.37 \pm 2.42}$ \\
+ & Abl. 3: Quad. $q^2$ (No PGD) & $97.62 \pm 0.78$ & $86.50 \pm 1.47$ & $89.02 \pm 2.60$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation Analysis and 12-Layer Gradient Retention}
+Table~\ref{tab:ablation} isolates each component across 10 seeds, while Fig.~\ref{fig:percentiles} illustrates the per-neuron parameter specialization trajectories under Adam + PGD. Removing box-constrained PGD in favor of quadratic reparameterization ($\gamma = q^2$, Ablation 3) degrades \textit{Diabetes} robustness under $+15\sigma$ spikes from $\mathbf{6.60 \pm 3.71}$ to $11.68 \pm 9.45$ and under $-15\sigma$ spikes from $\mathbf{4.70 \pm 1.88}$ to $7.41 \pm 6.71$. Per-neuron parameterization outperforms layerwise parameter sharing on \textit{Diabetes} across all three metrics, whereas both perform comparably on \textit{Breast Cancer}.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig2_neuron_percentiles.png}
+\caption{Per-neuron parameter evolution (median P50 and interdecile range P10--P90 averaged across 10 seeds) in Hidden Layers 1 and 2 on Diabetes under Adam + box-constrained PGD.}
+\label{fig:percentiles}
+\end{figure*}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{Gradient Norm Retention in a 12-Layer Network (10 Seeds)}
+\label{tab:deep_grad}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Activation} & \textbf{Layer 12} & \textbf{Layer 1} & \textbf{Retention (L1/L12)} \\
+\midrule
+Sigmoid (Xavier) & $7.68 \times 10^{-1}$ & $3.44 \times 10^{-8}$ & $0.0000$ \\
+ReLU (He) & $4.01 \times 10^{0}$ & $8.15 \times 10^{-1}$ & $0.4505$ \\
+Clipped PReLU (He) & $1.35 \times 10^{1}$ & $2.51 \times 10^{0}$ & $0.2778$ \\
+GELU (He) & $1.14 \times 10^{0}$ & $5.15 \times 10^{-1}$ & $0.6680$ \\
+\textbf{P-SRA Balanced ($\beta_0=0.08$)} & $8.65 \times 10^{-1}$ & $3.25 \times 10^{-1}$ & $\mathbf{0.7096}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In unresidualized 12-layer networks (width 64, Table~\ref{tab:deep_grad}), Sigmoid suffers complete gradient vanishing ($3.44 \times 10^{-8}$ at Layer 1) and hard-clipped PReLU drops to a retention ratio of $0.2778$ due to boundary saturation. In contrast, \textit{P-SRA Balanced} achieves the highest relative gradient retention ($\mathbf{0.7096}$, ahead of GELU's $0.6680$ and ReLU's $0.4505$).
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{Scalability on Fashion-MNIST (60k Train / 10k Test, 5 Seeds, CPU)}
+\label{tab:fmnist}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Activation} & \textbf{Clean Acc (\%)} & \textbf{Noisy ($+10\sigma$)} & \textbf{CPU Time (s)} \\
+\midrule
+ReLU & $87.83 \pm 0.40$ & $71.49 \pm 1.05$ & $\mathbf{23.30 \pm 1.67}$ \\
+Clipped PReLU & $87.95 \pm 0.59$ & $71.51 \pm 0.89$ & $31.05 \pm 3.39$ \\
+GELU & $87.94 \pm 0.37$ & $71.00 \pm 1.02$ & $32.39 \pm 1.88$ \\
+\textbf{P-SRA Balanced} & $\mathbf{88.04 \pm 0.41}$ & $\mathbf{71.90 \pm 0.30}$ & $29.65 \pm 1.56$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{CPU Execution Overhead and Fashion-MNIST Scaling}
+On compact tabular networks (Table~\ref{tab:unified_tabular}), updating $3N$ per-neuron parameters in pure NumPy introduces Python-level overhead on small input dimensions (\textit{Diabetes}, $969.5\text{ ms}$ vs.\ GELU's $717.3\text{ ms}$). However, on higher-dimensional workloads such as 784-input \textit{Fashion-MNIST} (Table~\ref{tab:fmnist}), avoiding transcendental \texttt{tanh} evaluations yields faster wall-clock training than GELU ($29.65 \pm 1.56\text{ s}$ vs.\ $32.39 \pm 1.88\text{ s}$) and Clipped PReLU ($31.05 \pm 3.39\text{ s}$), while achieving the highest clean accuracy ($\mathbf{88.04 \pm 0.41\%}$) and lowest variance under $+10\sigma$ pixel corruption ($\mathbf{71.90 \pm 0.30\%}$).
+
+\section{Conclusion and Future Work}
+Our unified experiments indicate that P-SRA provides a mathematically consistent, competitive alternative to standard activations, particularly in scenarios requiring smooth asymmetric outlier damping and deep gradient preservation without transcendental evaluations. Controlled comparisons against hard-clipped PReLU confirm that P-SRA's smooth rational curvature—rather than output range truncation alone—drives its superior regression stability under extreme perturbations and its 0.7096 gradient retention across 12 layers. At the same time, per-neuron parameter updates incur measurable Python overhead on very small networks, and fixed rational units such as Elliott remain stronger under extreme regression noise at the cost of lower classification flexibility. Future work will focus on fused C++/AVX2 SIMD kernels to eliminate Python parameter-update overhead, adaptive initialization schedules for $\beta_0$, and evaluations on deeper convolutional and sequence architectures.
+
+\begin{thebibliography}{6}
+\bibitem{he2015delving}
+K. He, X. Zhang, S. Ren, and J. Sun, ``Delving deep into rectifiers: Surpassing human-level performance on ImageNet classification,'' in \textit{Proc. IEEE Int. Conf. Comput. Vis. (ICCV)}, 2015, pp. 1026--1034.
+
+\bibitem{clevert2016fast}
+D.-A. Clevert, T. Unterthiner, and S. Hochreiter, ``Fast and accurate deep network learning by exponential linear units (ELUs),'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2016.
+
+\bibitem{hendrycks2016gaussian}
+D. Hendrycks and K. Gimpel, ``Gaussian error linear units (GELUs),'' \textit{arXiv preprint arXiv:1606.08415}, 2016.
+
+\bibitem{elliott1993better}
+D. L. Elliott, ``A better activation function for artificial neural networks,'' Institute for Systems Research, Univ. Maryland, Tech. Rep. TR 93-8, 1993.
+
+\bibitem{molina2020pade}
+A. Molina, P. Schramowski, and K. Kersting, ``Pad\'e activation units: End-to-end learning of flexible activation functions in deep networks,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2020.
+
+\bibitem{kingma2015adam}
+D. P. Kingma and J. Ba, ``Adam: A method for stochastic optimization,'' in \textit{Proc. Int. Conf. Learn. Represent. (ICLR)}, 2015.
+\end{thebibliography}
+
+\end{document}
