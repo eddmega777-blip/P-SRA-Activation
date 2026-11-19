@@ -22,17 +22,17 @@ f(z; \alpha_j, \beta_j, \gamma_j) =
 $$
 
 - **Asymmetric Bounded Range:** $f(z) \in \left(-1,\; \frac{\alpha_j}{\beta_j}\right)$, providing an adaptive upper asymptote for positive activations while naturally bounding negative excursions at $-1$.
-- **Exact Spatial Derivative ($O(z^{-2})$ tail decay):**
-
-  $$
-  \frac{\partial f}{\partial z} =
-  \begin{cases}
-  \dfrac{\alpha_j}{(1 + \beta_j z)^2} & \text{if } z \ge 0 \\\\[8pt]
-  \dfrac{\gamma_j}{(1 - \gamma_j z)^2} & \text{if } z < 0
-  \end{cases}
-  $$
-
 - **Canonical Balanced Configuration:** Initialized at $\alpha_0 = 1.0$, $\beta_0 = 0.08$, $\gamma_0 = 0.35$, with direct PGD box constraints $\alpha_j \in [0.2, 2.5]$, $\beta_j \in [0.05, 2.0]$, $\gamma_j \in [0.05, 1.5]$ and elastic anchoring $\lambda_{\text{act}} = 10^{-3}$ toward initialization.
+
+**Exact Spatial Derivative ($O(z^{-2})$ tail decay):**
+
+$$
+\frac{\partial f}{\partial z} =
+\begin{cases}
+\dfrac{\alpha_j}{(1 + \beta_j z)^2} & \text{if } z \ge 0 \\\\[8pt]
+\dfrac{\gamma_j}{(1 - \gamma_j z)^2} & \text{if } z < 0
+\end{cases}
+$$
 
 ![P-SRA Geometry and Spatial Derivative](assets/fig1_psra_geometry.png)
 
