@@ -1,16 +1,15 @@
 cff-version: 1.2.0
-message: "If you use P-SRA or the unified benchmark code in your research, please cite this work."
-title: "P-SRA: Exploring Parametric Smooth Rational Activations Under Box-Constrained Projected Gradient Descent"
+message: "If you use P-SRA or the unified benchmark in your research, please cite this work."
+title: "P-SRA: Parametric Smooth Rational Activation"
+version: 1.0.0
+date-released: 2026-11-19
+license: MIT
+repository-code: "https://github.com/eddmega777-blip/P-SRA-Activation"
 authors:
   - family-names: "Calzada Hernández"
     given-names: "Eduardo"
-date-released: 2026-11-19
-version: "1.0.0"
-license: "MIT"
-repository-code: "https://github.com/eddmega777-blip/P-SRA-Activation"
 keywords:
-  - activation-functions
-  - rational-neural-networks
-  - projected-gradient-descent
-  - gradient-preservation
-  - cpu-inference
+  - activation functions
+  - rational neural networks
+  - projected gradient descent
+  - deep learning
